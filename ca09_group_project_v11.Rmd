@@ -1,0 +1,780 @@
+---
+title: "Final Group Project: AirBnB analytics"
+date: "12 Oct 2021"
+author: "Reading Time: About 8 minutes"
+output:
+  html_document:
+    highlight: zenburn
+    theme: flatly
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    code_folding: show
+---
+
+
+```{r setup, include=FALSE}
+# leave this chunk alone
+options(knitr.table.format = "html") 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, 
+  comment = NA, dpi = 300)
+```
+
+
+```{r load-libraries, echo=FALSE}
+
+library(tidyverse) # the usual stuff: dplyr, readr, and other goodies
+library(lubridate) # to handle dates
+library(GGally) # for correlation-scatter plot matrix
+library(ggfortify) # to produce residual diagnostic plots
+library(rsample) # to split dataframe in training- & testing sets
+library(janitor) # clean_names()
+library(broom) # use broom:augment() to get tidy table with regression output, residuals, etc
+library(huxtable) # to get summary table of all models produced
+library(kableExtra) # for formatting tables
+library(moderndive) # for getting regression tables
+library(skimr) # for skim
+library(mosaic)
+library(leaflet) # for interactive HTML maps
+library(tidytext)
+library(viridis)
+library(vroom)
+library(corrplot)
+```
+
+#Executive Summary
+
+##Overview
+The purpose of this memo is to explore data on Airbnb listings in Barcelona and understand the key drivers of price, from the viewpoint of 2 people looking to visit the city for 4 nights.
+
+##Methodology
+What is the best model to predict the price of 2 adults visiting Barcelona for 4 nights?
+
+We started our project with Exploratory Data Analysis (EDA), which offered insights into the types, content, and relevance of the existing variables. We then progressed to our models, after checking for the correlation of our independent variables, in order to find an optimal regression model that will predict the price.
+
+
+##Findings 
+
+###Exploratory Data Analysis
+
+This section explores the steps we have taken to tidy and understand the data:
+
+- Data Wrangling, since not all variables were of the appropriate type
+- Rejection of variables that were incomplete or only had "NA" observations
+- Adjusted the levels of some variables by clustering and categorising them
+- Created new cleaned variables 
+- Excluded NA observations in the variables we deemed relevant 
+
+After selecting and adjusting relevant variables, we created summary statistics, charts, tables, and correlation matrices to visualise the data. During that, we concluded some correlation between *[insert findings]*
+
+###Regression Analysis
+
+This section showcases our work on examining relevant independent variables and constructing a number of different regression models to identify the optimal model, which should be the one which explains the highest portion of variance in the price of Airbnb listings in Barcelona.
+
+####Optimal Model
+
+- Predictor variables across the following categories: *[insert findings]*
+- Problematic collinearity *[insert findings]*
+- The estimated stay for 2 adults spending four nights in Barcelona would cost between *[insert findings]*
+
+#Loading the Data
+
+
+```{r load_data, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+
+# use cache=TRUE so you dont donwload the data everytime you knit
+
+listings <- vroom("http://data.insideairbnb.com/spain/catalonia/barcelona/2021-09-10/data/listings.csv.gz") %>% 
+       clean_names()
+
+```
+
+#Exploratory Data Analysis
+
+In our EDA, we will attempt to answer to following questions:
+
+1. Which variables are relevant?
+2. Does the data need cleaning?
+3. Do we have outliers which we need to exclude?
+4. Are there variables we need to convert?
+5. Are there any additional variables we need to create based on the manipulation of existing data?
+6. What is the relationship between the relevant variables? (Through this, we want to examine how successfully independent variables explain dependent variables)
+7. What are the dependent and independent variables?`review_scores_rating`: Average review score (0 - 100)
+ 
+
+##Raw Values
+
+We use glimpse() to have a look at the data. There are 16,206 observations across 74 variables and presumably we might not actually need all of them, because some might be overlapping and some irrelevant.
+
+```{r, glimpse data frame}
+glimpse(listings)
+```
+
+We use skim() to identify missing values, and get a better picture of the data set. We make the following observations:
+- Some numeric variables are listed as character
+- There are a lot of missing values for character and numeric variables
+- Especially for the ratings, a lot of values are missing
+- There are many irrelevant variables
+
+```{r, skim data frame}
+skim(listings)
+```
+
+
+##Answering our EDA Questions - some of the steps we have taken below 
+
+- Some of the pieces of data are of the wrong type or contain irrelevant data. For example, "price" is not only a "character" variable, but also contains the troublesome "$" symbol, which must be removed before proper analysis can begin. Also, the "bathrooms_text" data seems to be of use to our analysis, but first we need to once again turn it into a double-type data and remove the pesky text from it.
+
+- Some of the listings are located in irrelevant cities or countries. The "host_location" variable has observations of listings which are not located in Barcelona, and as such we must filter out pieces of data from irrelevant locations in the data frame.
+
+- There are some variables that seem rather irrelevant. For example, the "last_scraped" data, "name" and other such data seem a bit useless for analytical purposes, so we have to filter them out.
+
+- There are NA values which we must omit for our analysis to be as accurate as possible.
+
+- For the convenience of coding, comparing data and analysing, we converted the following 4 variables to numeric: price, bathrooms_text, host_response_rate, host_acceptance_rate.
+
+- We created "property_type" by grouping data into 5 categories based on frequency distribution to control from the largest subgroups. Our 5 categories are "Entire rental unit","Private room in rental unit", "Entire serviced apartment","Entire condominium (condo)", “Other”.
+
+- We created "neighbourhood_group_cleansed" by categorizing neighbourhoods into 4 different categories: North, Center, Coastal Line and West. 
+
+- In addition, we created 5 data frames: host_specific, property_specific, reviews_specific, logical_specific, categorical_specific. For each of the 5 data frames, we have an overview of distribution and characteristics of each variable to see which variables might have the strongest power of predicting the price. 
+
+- In the correlation matrix, blue represents for positive correlation and red represents for negative correlation. The darker the color is, the stronger the correlation between the variables. From our correlation matrix graph, we can see that the correlations between any two of bedroom, beds and accommodates are positive and relatively high. Also, another group of variables has relatively high positive correlation is the review-related variables, such as review scores cleanliness, review scores checkin, review scores communication, review scores location and review scores value. I think it is reasonable since these variables all describe reviews so they are somehow link to each other. Otherwise, variables have relatively weak negative correlation as indicated by very light red colour.
+
+- Price is the dependent variable, while factors that might influence the price and people's preferences regarding the Barcelona AirBnB are independent variable, for example, property type, number of reviews, neighbourhood and so on.
+
+##Creating our working data frame: Barcelona
+
+We start out by cleansing out the entire data frame for only entries in which "Barcelona" is mentioned so that henceforth we know we are only wrangling relevant geographical data.
+
+```{r, create Barcelona data frame and filter for correct location}
+
+barcelona <- listings %>% 
+  filter(host_location %in% c("Barcelona", 
+                              "BARCELONA", 
+                              "Barcelona, Barcelona, Spain", 
+                              "Barcelona, BARCELONA, Spain",
+                              "Barcelona, Catalonia, Spain",
+                              "Barcelona, Cataluña, Spain",
+                              "Barcelona, Catalunya, Spain")) 
+ 
+```
+
+
+
+Having done this, we can now filter out the data frame for specific variables that we wish to analyse, turn the problematic pieces of data into their correct data types, and remove the NA data from our frame (thus fixing the other issues mentioned above). After thorough consideration, we decided that the factors which are most interesting and relevant to our EDA are in relation to the characteristics of the hosts themselves and their properties. 
+
+```{r, select relevant variables for our barcelona data frame}
+
+barcelona <- listings %>%  
+  select(
+         id,
+         host_response_rate,
+         host_acceptance_rate,
+         host_is_superhost,
+         host_listings_count,
+         host_has_profile_pic,
+         host_identity_verified,
+         neighbourhood_cleansed,
+         has_availability,
+         instant_bookable,
+         neighbourhood_group_cleansed,
+         latitude,
+         longitude,
+         property_type,
+         room_type,
+         property_type,
+         accommodates,
+         bathrooms_text,
+         bedrooms,
+         beds,
+         price,
+         minimum_nights,
+         maximum_nights,
+         availability_30,
+         number_of_reviews,
+         review_scores_rating,
+         review_scores_accuracy,
+         review_scores_cleanliness,
+         review_scores_checkin,
+         review_scores_communication,
+         review_scores_location,
+         review_scores_value,
+         reviews_per_month,
+         instant_bookable
+         )
+
+
+# We convert the price from character to numeric
+barcelona$price <- as.numeric(gsub("\\$","",barcelona$price))
+
+#We convert bathrooms_text into a variable with number of bathrooms
+barcelona$bathrooms <- substr(barcelona$bathrooms_text, 1,2)
+barcelona$bathrooms <- as.numeric(gsub("\\.","",barcelona$bathrooms))
+
+#We convert the host_response_rate variable to numeric
+barcelona$host_response_rate <- as.numeric(gsub("\\%","",barcelona$host_response_rate))
+barcelona$host_acceptance_rate <- as.numeric(gsub("\\%","",barcelona$host_acceptance_rate))
+
+#omit NA variables
+barcelona <- na.omit(barcelona)
+skim(barcelona)
+
+```
+
+
+Having now pulled the specific variables we want to analyse in our data frame and tidy it up a bit, we then proceed to separate property types based on specific subgroups.
+
+
+```{r, create a categorical variable for property type}
+#we group the property types into 5 categories according to frequency distribution to only control for the largest subgroups
+barcelona <- barcelona %>%
+  mutate(prop_type_simplified = case_when(
+    property_type %in% c("Entire rental unit","Private room in rental unit", "Entire serviced apartment","Entire condominium (condo)") ~ property_type, 
+    TRUE ~ "Other"
+  ))
+
+#We check whether the categorization has been performed correctly
+barcelona %>%
+  count(property_type, prop_type_simplified) %>%
+  arrange(desc(n)) %>% 
+  kbl(col.names = c("Property Type", "Category", "Count"),caption = "Count by Property Type") %>% 
+  kable_styling() 
+
+#We exclude listings that have minimum nights requirement greater than 4
+barcelona <- barcelona %>% 
+  filter(minimum_nights<=4)
+
+#Here we categorize the grouped neighbourhoods in Barcelona in 4 different categories: North, Center, Coastal Line, and West
+barcelona <- barcelona %>% 
+  mutate(neighbourhood_simplified = case_when(
+    neighbourhood_group_cleansed %in% c("Horta-Guinardó","Nou Barris","Sarrià-Sant Gervasi") ~ "North",
+    neighbourhood_group_cleansed %in% c("Eixample", "Gracia") ~ "Center",
+    neighbourhood_group_cleansed %in% c("Ciutat Vella", "Sant Martí","Sants-Montjuïc") ~ "Coastal line",
+    TRUE ~ "West"
+  ))
+
+barcelona %>%
+  count(neighbourhood_group_cleansed, neighbourhood_simplified) %>%
+  arrange(desc(n))%>% 
+  kbl(col.names = c("Neighbourhood", "Neighbourhood's Category", "Count"),caption = "Count and Category by Neighbourhood") %>% 
+  kable_styling()
+
+```
+
+
+Now, to make our analysis more comprehensive, we further split our data frame into 5 different categories:
+
+- Host Specific: Data frame looking specifically at data relating to hosts themselves
+- Property Specific: Data frame looking at specific characteristics of the properties
+- Reviews Specific: Data frame looking at how users reviewed specific aspects of these properties and hosts
+- Logical Specific: Data frame analysing whether listings meet specific requirements
+- Categorical Specific: Data frame looking at the different neighbourhoods and types of properties we listed above
+
+
+```{r, create different data frames according to type and content}
+
+host_specific <- barcelona %>% 
+  select(host_response_rate,
+         host_acceptance_rate,
+         host_listings_count
+         )
+
+property_specific <- barcelona %>% 
+  select(accommodates,
+         bedrooms,
+         beds,
+         bathrooms,
+         )
+
+reviews_specific <- barcelona %>% 
+  select(number_of_reviews,
+         review_scores_accuracy,
+         review_scores_checkin,
+         review_scores_cleanliness,
+         review_scores_location,
+         review_scores_communication,
+         review_scores_value,
+         review_scores_rating
+         )
+
+logical_specific <- barcelona %>% 
+  select(host_is_superhost,
+         host_has_profile_pic,
+         host_identity_verified,
+         has_availability,
+         instant_bookable)
+
+categorical_specific <- barcelona %>% 
+  select(neighbourhood_group_cleansed,
+         prop_type_simplified,
+         room_type)
+
+```
+
+
+Firstly, we look at the property-related variables, mutate the data frames we created for these to include new variables explaining how well the properties accommodate guests in terms of bathrooms, and then create density charts to visualise the sizes of the properties which we are exploring.
+
+```{r, property related variables and exploratory charts}
+
+property_specific <- property_specific %>% 
+  mutate(bathrooms_per_guest=bathrooms/accommodates,
+         bedrooms_per_guest=bedrooms/accommodates)
+
+
+property_specific_longer <- property_specific %>% 
+  select(bathrooms_per_guest,
+         bedrooms_per_guest,
+         bathrooms,
+         bedrooms,
+         beds,
+         accommodates) %>% 
+  pivot_longer(names_to="variable_name", values_to="values",everything())
+
+ggplot(property_specific_longer, aes(x=values), na.rm=TRUE)+
+  geom_density(fill="grey")+
+  facet_wrap(vars(variable_name), scales="free", ncol=3)+
+  labs(title="Property related variables affecting prices of Airbnb in Barcelona", x="", y="Density")+
+  theme(axis.title = element_text()) + 
+  theme(axis.text.y=element_blank())+
+  theme_bw()+
+  NULL
+
+ggpairs(property_specific)
+```
+
+
+Looking at the distribution, we see that beds and accommodates seem to have a similar distribution. Thus, they might be correlated, if that's the case we should only use one of them for our model. The other distributions are not unified, thus they might have an influence on prices.
+
+
+```{r, host related variables and explanatory charts}
+
+barcelona$host_response_rate <- barcelona$host_response_rate/100
+barcelona$host_acceptance_rate <- barcelona$host_acceptance_rate/100
+
+host_specific <- barcelona %>% 
+  select(host_response_rate,
+         host_acceptance_rate,
+         host_listings_count,
+         ) %>% 
+  pivot_longer(names_to= "data_names", values_to="data_values", everything())
+
+ggplot(host_specific, aes(x = data_values), na.rm=TRUE) +
+  geom_density(fill = "blue") +
+  facet_wrap(vars(data_names), scales="free") +
+  labs(x = "", y = "Density", title = "Host-Specific Variables affecting Prices of AirBnB in Barcelona") +
+  theme_bw() +
+  NULL
+
+ggpairs(host_specific)
+```
+
+
+Looking at these charts, we can see that the listings count is very unified, thus it might not influence prices. Acceptance rate seems to be the least unified, hence it could be interesting for our regression model. Last, we can note that the response rate shows a similar pattern to the acceptance rate, so they might be correlated.
+
+
+```{r, reviews related variables and exploratory charts}
+
+reviews_specific %>%
+  pivot_longer(names_to= "data_names", values_to="data_values", everything())%>%
+  ggplot(aes(x = data_values), na.rm=TRUE) +
+  geom_density(fill = "red",alpha = 0.4) +
+  facet_wrap(vars(data_names), scales="free") +
+  labs(x = "", y = "Density", title = "Reviews-Specific Variables affecting Prices of AirBnB in Barcelona") +
+  theme_bw() +
+  NULL
+
+
+ggpairs(reviews_specific)
+```
+
+
+All the distributions are extremely skewed to the left. Most of them are very unified and might thus not be interesting to include in our model. The least unified variables that could be considered are: review score cleanliness, review score rating and review score value.
+
+
+```{r, logical variables and explanatory table}
+
+#rename logical variables
+colnames(logical_specific) <- c("Host is a Superhost", "Host has a Profile Picture", "Host's Identity is Verified", "Property is Available", "Property is Instantly Bookable")
+
+#create table to better visualise logical variables
+logical_visualisation <- logical_specific %>%
+  
+  #pivot table to perform next steps
+  pivot_longer(cols = 1:5,
+               names_to = "var",
+               values_to = "logical") %>% 
+  
+  #group by variable and logical result (True or False)
+  group_by(var, logical) %>%
+  
+  #count number of True and False for each variable
+  summarise(count = n()) %>% 
+  
+  #pivot wider to have one row per variable and one column for each "True" and "False" count
+  pivot_wider(names_from = "logical",
+              values_from = "count") %>%
+  
+  #Format table with kableExtra, renmaing columns, adding title
+  kbl(col.names = c("Logical Variable", "Count of True", "Count of False"), caption = "Count of True and False by Logical Variable")%>% 
+  kable_styling()
+
+
+#display table
+logical_visualisation
+
+```
+ 
+ 
+Looking at the above table and considering what each variable represents we can conclude that:
+- most flats are not available, this potentially reflects a high demand and could influence prices (for instance the cheapest flats or the flats with the best price/quality balance are probably already booked)
+- a majority (~55%) of flats are instantly bookable, however, the distribution of True vs False is the most balanced of all variables. Consequently, this could have an important impact on the price.
+- almost all the hosts have a profile picture, thus this probably has no impact on the price.
+- a large majority (~80%) of hosts are superhosts, considering that superhosts are hosts who received great ratings, this could have a slight impact on the price.
+- a large majority (~80%) of hosts' identities are verified, considering this is an indicator of security, it could slightly influence the price.
+
+
+```{r, categorical variables and descriptive graphs}
+
+categorical_specific_longer <- categorical_specific %>%
+  pivot_longer(names_to="variable_name", values_to="values",everything()) %>% 
+  group_by(variable_name,values) %>% 
+  mutate(observations=n())
+
+ggplot(categorical_specific_longer, aes(y=reorder(values,observations)),
+                                        na.rm=TRUE)+
+  geom_bar(fill="grey",orientation = "y")+
+  facet_wrap(vars(variable_name), scales="free", ncol=1)+
+  labs(title="Categorical variables affecting prices of Airbnb in Barcelona",
+             x="", y="Density")+
+  theme_bw()+
+  NULL
+
+
+
+```
+
+We can see that none of the variable is unified, thus they all have the potential to be useful in predicting variability in prices.
+
+
+
+# Mapping 
+
+##Map of AirBnBs in Barcelona by Price
+
+```{r, out.width = '80%', Mapping based on price}
+
+#we set the color for price to red and create the palette
+price_color <- colorNumeric(palette = "Reds",
+                            domain = c(1:200),
+                            reverse = FALSE)
+
+#We will use the listings data frame for the mapping, so we have to convert price to numeric here as well
+listings$price <- as.numeric(gsub("\\$","",listings$price))
+
+#Adding circle markers with popups and colors depending on price range
+leaflet(data = filter(listings, minimum_nights <= 4)) %>% 
+  addProviderTiles("OpenStreetMap.Mapnik") %>% 
+  addCircleMarkers(lng = ~longitude, 
+                   lat = ~latitude, 
+                   radius = 1, 
+                   color = ~price_color(price), 
+                   fillOpacity = 0.4, 
+                   popup = ~listing_url,
+                   label = ~property_type)
+```
+
+There is a direct correlation between property prices and proximity to the city center. There appear to be clusters of properties with distinctively higher prices, which could be explained by proximity to touristic locations or transportation connections
+
+```{r, out.width = '80%', Mapping based on location clusters}
+
+map_cluster <-leaflet(data = filter(listings, minimum_nights <= 4)) %>%
+  
+  # Map with OpenStreetMap.Mapnik
+  addProviderTiles("OpenStreetMap.Mapnik") %>% 
+
+  # Add circle markers with popups and labels
+  addCircleMarkers(lng = ~longitude, 
+                   lat = ~latitude, 
+                   radius = 1, 
+                   fillOpacity=0.6,
+                   popup = ~listing_url,
+                   label = ~property_type,
+                   
+                   # cluster 
+                   clusterOptions = markerClusterOptions())
+#print map_cluster
+map_cluster
+```
+
+There appears to be a direct correlation between the number of properties and the proximity to the city center. Largest clustering in “Ciutat Vela” and ”Eixample” which are known mainly for theirpopular tourist spots and renowned architecture
+
+
+# Regression Analysis
+
+For the target variable $Y$, we will use the cost for two people to stay at an Airbnb location for four (4) nights. 
+
+Create a new variable called `price_4_nights` that uses `price`, and `accomodates` to calculate the total cost for two people to stay at the Airbnb property for 4 nights. This is the variable $Y$ we want to explain.
+
+Use histograms or density plots to examine the distributions of `price_4_nights` and `log(price_4_nights)`. Which variable should you use for the regression model? Why?
+
+```{r}
+barcelona_analysis <- barcelona %>% 
+  
+  #filter for 2 people
+  filter(accommodates >= 2) %>%
+  
+  #calculate price for 4 nights 
+  mutate(price_4_nights = price * 4,
+         logprice_4_nights = log(price_4_nights))
+
+#create desnity plot
+ggplot(data = barcelona_analysis, aes(price_4_nights)) +
+  geom_density()+
+  #add title and axis titles
+  labs(title = "Density Plot of the Price for 2 People for  4 Nights", 
+       y = "Density", 
+       x = "Price for 2 for 4 Nights")+
+  #change theme
+  theme_bw()+
+  NULL
+
+#create density plot with logarithmic scale
+ggplot(data = barcelona_analysis, aes(logprice_4_nights)) +
+  geom_density()+
+  #add title and axis titles
+  labs(title = "Density Plot of the Price for 2 People for 4 Nights - Logarithmic Scale", 
+       y = "Density - Logarithmic", 
+       x = "Price for 2 for 4 Nights")+
+  #change theme
+  theme_bw()+
+  NULL
+
+
+```
+
+
+```{r}
+
+glimpse(barcelona)
+barcelona$host_acceptance_rate
+
+correlation_matrix_numeric <- barcelona %>%
+  select(host_acceptance_rate,  host_listings_count, latitude, longitude, accommodates, bedrooms, beds, price, minimum_nights, maximum_nights, availability_30, number_of_reviews, review_scores_accuracy, review_scores_cleanliness, review_scores_checkin, review_scores_communication, review_scores_location, review_scores_value, reviews_per_month, bathrooms) %>%
+  cor()
+
+corrplot(correlation_matrix_numeric, is.corr = FALSE,
+         method="color",
+         type="full",
+         title="Correlation matrix of numerical variables")
+
+Correlation <- cor(correlation_matrix_numeric , use="pairwise.complete.obs")
+Correlation
+```
+
+
+
+## We will use the normally distributed logprice_4_nights for our analysis.
+
+## Model 1
+Fit a regression model called `model1` with the following explanatory variables: `prop_type_simplified`, `number_of_reviews`, and `review_scores_rating`. 
+
+- Interpret the coefficient `review_scores_rating` in terms of `price_4_nights`.
+- Interpret the coefficient of `prop_type_simplified` in terms of `price_4_nights`.
+
+```{r}
+model1 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating, data = barcelona_analysis)
+msummary(model1)
+```
+
+## - According to the regression analysis, coefficient of `review_scores_rating` in terms of `logprice_4_nights` is 0.06255, which indicates if `review_scores_rating` increase by 1, `price_4_nights` will increase by exp(0.06255)-1 = 6.455%.
+
+## - According to the regression analysis, coefficients of `prop_type_simplifiedEntire rental unit`, `prop_type_simplifiedEntire serviced apartment`, `prop_type_simplifiedOther` and `prop_type_simplifiedPrivate room in rental unit` in terms of `logprice_4_nights` are -0.0003, 0.3349, -0.3822 and -0.9296 respectively.
+##   - If property type changes from `Entire condominium (condo)` to `Entire rental unit`, `price_4_nights` will decrease by exp(0.0003176)-1 = 0.0318%.
+##    - If property type changes from `Entire condominium (condo)` to `Entire serviced apartment`, `price_4_nights` will increase by exp(0.3349)-1 = 39.78%.
+##    - If property type changes from `Entire condominium (condo)` to `Other`, `price_4_nights` will decrease by exp(0.3822)-1 = 46.55%.
+##    - If property type changes from `Entire condominium (condo)` to `Private room in rental unit`, `price_4_nights` will decrease by exp(0.9296)-1 = 153.346%.
+
+## We want to determine if `room_type` is a significant predictor of the cost for 4 nights, given everything else in the model. Fit a regression model called model2 that includes all of the explananatory variables in `model1` plus `room_type`. 
+
+```{r}
+model2 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating + room_type, data = barcelona_analysis)
+msummary(model2)
+```
+
+## Further variables/questions to explore on our own
+
+Our dataset has many more variables, so here are some ideas on how you can extend your analysis
+
+1. Are the number of `bathrooms`, `bedrooms`, `beds`, or size of the house (`accomodates`) significant predictors of `price_4_nights`? Or might these be co-linear variables?
+
+```{r}
+model3 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating + room_type + bathrooms + bedrooms + beds + accommodates, 
+             data = barcelona_analysis)
+msummary(model3)
+car::vif(model3)
+```
+
+To make GVIFs comparable across variables, we can use the Square of GVIF^(1/(2*DF)).  This reduces GVIF to a linear measure.  If the calculated value is less than 5, then we can conclude that there is no Multicollinearity.
+
+Accommodates reflects collinearity as the Square of (2.352034)^2 > 5.  Hence, we remove this variable from our analysis.
+
+
+## According to the regression, `bathrooms` and `accommodates` does command a pricing premium, `bedrooms` and `beds` does not command a pricing premium after controlling for other variable. We need to remove`bedrooms` and `beds`from the model.
+
+## According to the VIF, there are no significant co-linear variables that we need to remove.
+
+
+1. Do superhosts `(host_is_superhost`) command a pricing premium, after controlling for other variables?
+
+```{r}
+model4 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating + room_type + bathrooms + host_is_superhost, 
+             data = barcelona_analysis)
+msummary(model4)
+```
+
+## According to the regression, superhosts `(host_is_superhost`) does not command a pricing premium, after controlling for other variable. We need to remove it from the model.
+
+
+1. Some hosts allow you to immediately book their listing (`instant_bookable == TRUE`), while a non-trivial proportion don't. After controlling for other variables, is `instant_bookable` a significant predictor of `price_4_nights`?
+
+```{r}
+model5 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating + room_type + bathrooms +  instant_bookable, 
+             data = barcelona_analysis)
+msummary(model5)
+
+```
+
+## According to the regression, `instant_bookable` is a significant predictor of `price_4_nights`.
+
+1. For all cities, there are 3 variables that relate to neighbourhoods: `neighbourhood`, `neighbourhood_cleansed`, and `neighbourhood_group_cleansed`. There are typically more than 20 neighbourhoods in each city, and it wouldn't make sense to include them all in your model. Use your city knowledge, or ask someone with city knowledge, and see whether you can group neighbourhoods together so the majority of listings falls in fewer (5-6 max) geographical areas. You would thus need to create a new categorical variabale `neighbourhood_simplified` and determine whether location is a predictor of `price_4_nights`
+
+```{r}
+model6 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating + room_type + bathrooms + instant_bookable + neighbourhood_simplified, 
+             data = barcelona_analysis)
+msummary(model6)
+```
+
+
+1. What is the effect of `avalability_30` or `reviews_per_month` on `price_4_nights`, after we control for other variables?
+
+```{r}
+model7 <- lm(logprice_4_nights ~ prop_type_simplified + number_of_reviews + review_scores_rating + room_type + bathrooms + instant_bookable + neighbourhood_simplified + availability_30 + reviews_per_month,
+             data = barcelona_analysis)
+msummary(model7)
+```
+
+## According to the regression, `avalability_30` and `reviews_per_month` have significance effects on `price_4_nights`. If the availability of the listing 30 days increases by 1, `price_4_nights` will increase by exp(0.01149)-1 = 1.16%. If `reviews_per_month` increase by 1, `price_4_nights` will decrease by exp(0.01382)-1 = 1.39%.
+
+
+## Diagnostics, collinearity, summary tables
+
+
+As you keep building your models, it makes sense to:
+
+1. Check the residuals, using `autoplot(model_x)`
+
+```{r}
+autoplot(model7)
+
+```
+
+## According to the QQ plot, residuals roughly obey Normal Distribution. But it needs further improvement.
+
+1. As you start building models with more explanatory variables, make sure you use `car::vif(model_x)`` to calculate the **Variance Inflation Factor (VIF)** for your predictors and determine whether you have colinear variables. A general guideline is that a VIF larger than 5 or 10 is large, and your model may suffer from collinearity. Remove the variable in question and run your model again without it.
+```{r}
+car::vif(model7)
+
+```
+
+
+1. Create a summary table, using `huxtable` (https://mfa2022.netlify.app/example/modelling_side_by_side_tables/) that shows which models you worked on, which predictors are significant, the adjusted $R^2$, and the Residual Standard Error.
+
+```{r}
+huxreg(model1, model2, model3, model4, model5, model6, model7)
+
+```
+
+## According to huxtable, we decide to choose model7 for its R2 is the highest and all the variables are significant except Entire rental unit within property_type_simplified.
+
+```{r, best model}
+best_model <- lm(logprice_4_nights ~ prop_type_simplified + review_scores_rating + room_type + minimum_nights + bathrooms + bedrooms + accommodates + instant_bookable + neighbourhood_simplified + availability_30 + reviews_per_month + host_is_superhost + host_response_rate + host_acceptance_rate + review_scores_cleanliness + review_scores_checkin + review_scores_location + review_scores_value,
+             data = barcelona_analysis)
+msummary(best_model)
+car::vif(best_model)
+
+```
+
+```{r}
+huxreg(model1, model7, best_model)
+autoplot(best_model, label.size = 3)+
+  theme_bw()
+
+```
+
+```{r, test and train data}
+set.seed(123)
+# create train_test_split, 75% for training 25% for testing
+train_test <- initial_split(barcelona_analysis, prop = 0.75) 
+listings_train <- training(train_test)
+listings_test <- testing(train_test)
+
+rmse_train <- 
+  listings_train %>% 
+  mutate(predictions = exp(predict(best_model, .))) %>% 
+  summarise(sqrt(sum(predictions - price_4_nights)**2/n())) %>% 
+  pull()
+
+rmse_train
+
+rmse_test <-
+  listings_test %>% 
+  mutate(predictions = exp(predict(best_model, .))) %>% 
+  summarise(sqrt(sum(predictions - price_4_nights)**2/n())) %>% 
+  pull()
+
+rmse_test
+
+```
+1. Finally, you must use the best model you came up with for prediction. Suppose you are planning to visit the city you have been assigned to over reading week, and you want to stay in an Airbnb. Find Airbnb's in your destination city that are apartments with a private room, have at least 10 reviews, and an average rating of at least 90. Use your best model to predict the total cost to stay at this Airbnb for 4 nights. Include the appropriate 95% interval with your prediction. Report the point prediction and interval in terms of `price_4_nights`. 
+
+
+
+  - if you used a log(price_4_nights) model, make sure you anti-log to convert the value in $. You can read more about [hot to interpret a regression model when some variables are log transformed here](https://stats.idre.ucla.edu/other/mult-pkg/faq/general/faqhow-do-i-interpret-a-regression-model-when-some-variables-are-log-transformed/)
+
+
+# Deliverables
+
+
+- By midnight on Monday 17 Oct 2022, you must upload on Canvas a short presentation (max 4-5 slides) with your findings, as some groups will be asked to present in class. You should present your Exploratory Data Analysis, as well as your best model. In addition, you must upload on Canvas your final report, written  using R Markdown to introduce, frame, and describe your story and findings. You should include the following in the memo:
+
+1. Executive Summary: Based on your best model, indicate the factors that influence `price_4_nights`.
+This should be written for an intelligent but non-technical audience. All
+other sections can include technical writing.
+2. Data Exploration and Feature Selection: Present key elements of the data, including tables and
+graphs that help the reader understand the important variables in the dataset. Describe how the
+data was cleaned and prepared, including feature selection, transformations, interactions, and
+other approaches you considered.
+3. Model Selection and Validation: Describe the model fitting and validation process used. State
+the model you selected and why they are preferable to other choices.
+4. Findings and Recommendations: Interpret the results of the selected model and discuss
+additional steps that might improve the analysis
+  
+  
+
+Remember to follow R Markdown etiquette rules and style; don't have the Rmd output extraneous messages or warnings, include summary tables in nice tables (use `kableExtra`), and remove any placeholder texts from past Rmd templates; in other words, (i.e. I don't want to see stuff I wrote in your final report.)
+  
+  
+# Rubric
+
+Your work will be assessed on a rubric which you can find here
+
+
+```{r rubric, echo=FALSE, out.width="100%"}
+knitr::include_graphics(here::here("images", "rubric.png"), error = FALSE)
+```
+
+
+# Acknowledgements
+
+- The data for this project is from [insideairbnb.com](insideairbnb.com)
